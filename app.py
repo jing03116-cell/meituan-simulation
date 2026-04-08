@@ -18,8 +18,8 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-st.title("🎯 智能补贴推演沙盘")
-st.markdown("基于**因果推断 (Causal Inference)**与**运筹规划 (OR)**，在守住 ROI 底线的前提下，寻找大盘 GTV 规模的全局最优解。")
+st.title("智能补贴推演沙盘 (Causal-OR 纯净版)")
+st.markdown("基于因果推断 (Causal Inference)与运筹规划 (OR)，在守住 ROI 底线的前提下，寻找大盘 GTV 规模的全局最优解。")
 
 # ==========================================
 # 1. 健壮的数据基建与因果特征加载
@@ -29,9 +29,9 @@ def load_data():
     try:
         df = pd.read_csv("大宽表.csv")
     except:
-        # 兜底数据生成
+        # 兜底数据生成，确保程序始终可运行
         data = []
-        personas = ["高客单品质/家庭党", "极致神券外卖羊毛党", "线下到店体验/钝感党", "早午餐刚需/白嫖党"]
+        personas = ["高客单品质家庭党", "极致神券外卖羊毛党", "线下到店体验钝感党", "早午餐刚需白嫖党"]
         for i in range(200):
             idx = i % 4
             data.append({
@@ -40,40 +40,46 @@ def load_data():
                 "用券率": [0.3, 0.95, 0.2, 0.85][idx], 
                 "付费券使用率": [0.4, 0.6, 0.1, 0.1][idx],
                 "动态_点击_至_加购率": [0.65, 0.8, 0.35, 0.75][idx],
-                "补贴覆盖率": [0.2, 0.98, 0.1, 0.85][idx] # 用于推导纯自然流基线
+                "补贴覆盖率": [0.2, 0.98, 0.1, 0.85][idx] # 核心特征：用于推导纯自然流基线
             })
         df = pd.DataFrame(data)
+    
+    # 填充缺失值，防止运算报错
     for col in ['平均客单价', '用券率', '付费券使用率', '动态_点击_至_加购率', '补贴覆盖率']:
         if col in df.columns: df[col] = df[col].fillna(df[col].mean())
     return df
 
 df_users = load_data()
 
-# 剔除了运力相关参数，保留纯粹的转化模型
+# 定义业务场景的全局属性
 SCENARIOS = {
-    "☕ 周末下午茶": {"open_rate": 0.45, "base_pay": 0.35},
-    "🌧️ 暴雨晚高峰": {"open_rate": 0.65, "base_pay": 0.20}, 
-    "🚗 节假日出行": {"open_rate": 0.55, "base_pay": 0.45}
+    "周末下午茶": {"open_rate": 0.45, "base_pay": 0.35},
+    "暴雨晚高峰": {"open_rate": 0.65, "base_pay": 0.20}, 
+    "节假日出行": {"open_rate": 0.55, "base_pay": 0.45}
 }
 
 # ==========================================
-# 2. 策略空间穷举器
+# 2. 策略空间生成器 (Action Space)
 # ==========================================
 @st.cache_data
 def generate_action_space():
-    actions = [{"name": "🚫 留白 (不发券)", "type": "none", "cost": 0, "threshold": 0}]
+    actions = [{"name": "留白 (Control)", "type": "none", "cost": 0, "threshold": 0}]
+    
+    # 动态生成不同门槛和面额的免费券
     for t in [20, 30, 40, 50, 60, 80]:
         for d in [3, 5, 8, 10, 15]:
-            if d <= t * 0.3:
-                actions.append({"name": f"🎫 满{t}减{d}", "type": "free", "cost": d, "threshold": t})
-    actions.append({"name": "💎 1.9元买5元包", "type": "paid", "cost": 4, "threshold": 0})
-    actions.append({"name": "💎 4.9元买10元包", "type": "paid", "cost": 8, "threshold": 0})
+            if d <= t * 0.3: # 真实业务规则：折扣率通常不超30%
+                actions.append({"name": f"满{t}减{d} 免费券", "type": "free", "cost": d, "threshold": t})
+                
+    # 加入付费神券组合
+    actions.append({"name": "1.9元买5元付费包", "type": "paid", "cost": 4, "threshold": 0})
+    actions.append({"name": "4.9元买10元付费包", "type": "paid", "cost": 8, "threshold": 0})
     return actions
 
 ACTIONS = generate_action_space()
 
 # ==========================================
-# 3. 核心马尔可夫智能体 (纯净因果引擎)
+# 3. 核心因果马尔可夫引擎
 # ==========================================
 def causal_markov_funnel(user, scenario_name, action):
     buff = SCENARIOS[scenario_name]
@@ -82,50 +88,53 @@ def causal_markov_funnel(user, scenario_name, action):
     sens_paid = float(user['付费券使用率'])
     sub_coverage = float(user.get('补贴覆盖率', 0.5))
     
+    # 前门阻断：进端与加购环节使用历史平滑统计
     p_open = min(buff['open_rate'], 1.0)
     p_cart = max(float(user['动态_点击_至_加购率']), 0.1)
     
-    # [反事实基线] 无干预下的自然转化率
+    # 构建反事实自然流基线 (T=0)
     base_pay_rate = 0.5 * (1 - sub_coverage) * buff['base_pay']
     p_pay = max(base_pay_rate, 0.05) 
     
     used_coupon = False
     actual_aov = aov
     
-    # [干预增量] 只有成功跨越门槛，才产生干预效应
+    # 策略干预增量评估 (T=1)
     if action['type'] == 'free':
+        # 需满足业务门槛逻辑
         if aov >= action['threshold'] * 0.7:
             p_pay += (action['cost'] * 0.05 * sens_free) 
             used_coupon = True
-            actual_aov = max(aov, action['threshold'] + 1.0)
+            actual_aov = max(aov, action['threshold'] + 1.0) # 模拟凑单效应拉升客单价
     elif action['type'] == 'paid':
         if sens_paid > 0.05:
+            # 沉没成本锁定逻辑
             p_pay = max(p_pay + 0.4 * sens_paid, 0.85) 
             used_coupon = True
 
     p_pay = min(p_pay, 1.0)
     final_prob = p_open * p_cart * p_pay
     
+    # 严格隔离业务指标与财务成本
     exp_gtv = final_prob * actual_aov
     exp_coupon_cost = final_prob * action['cost'] if used_coupon else 0
     
     return exp_gtv, exp_coupon_cost, p_pay
 
 # ==========================================
-# 4. 侧边栏：商业边界条件
+# 4. 侧边栏：环境与约束控制台
 # ==========================================
-st.sidebar.image("https://img.icons8.com/color/96/000000/combo-chart--v1.png", width=60)
-st.sidebar.header("🛠️ 宏观环境与约束")
+st.sidebar.header("宏观环境与约束设置")
 selected_scenario = st.sidebar.selectbox("1. 业务场景设定", list(SCENARIOS.keys()))
 city_dau = st.sidebar.slider("2. 城市目标 DAU", 10000, 500000, 100000, 10000)
 
 st.sidebar.markdown("---")
-st.sidebar.subheader("⚖️ 商业寻优底线")
+st.sidebar.subheader("商业寻优红线")
 target_roi = st.sidebar.slider("要求最低 ROI", 1.0, 10.0, 3.0, 0.1)
 st.sidebar.caption("引擎将在保证大盘 ROI 不低于该红线的前提下，寻找 GTV 最大化的发券组合。")
 
 # ==========================================
-# 5. 运筹优化求解器
+# 5. 运筹优化求解器 (OR Solver)
 # ==========================================
 scale_factor = city_dau / len(df_users)
 best_policy = {}
@@ -134,6 +143,7 @@ group_metrics = []
 global_total_gtv = 0
 global_coupon_cost = 0
 
+# 分群贪心搜索 (带 ROI 约束)
 for persona, group in df_users.groupby('画像名称'):
     max_gtv = -1
     best_act = None
@@ -146,12 +156,15 @@ for persona, group in df_users.groupby('画像名称'):
             t_gtv += g; t_cost += c
             
         roi = t_gtv / t_cost if t_cost > 0 else 999
+        
+        # 核心筛选逻辑：满足 ROI 约束的前提下追求 GTV 极值
         if roi >= target_roi or act['type'] == 'none':
             if t_gtv > max_gtv:
                 max_gtv = t_gtv; best_act = act; best_cost = t_cost
                 
     best_policy[persona] = best_act
     
+    # 放大至城市大盘体量
     g_gtv = max_gtv * scale_factor * (len(group)/len(df_users))
     g_cost = best_cost * scale_factor * (len(group)/len(df_users))
     
@@ -163,39 +176,38 @@ for persona, group in df_users.groupby('画像名称'):
 final_roi = global_total_gtv / global_coupon_cost if global_coupon_cost > 0 else 0
 
 # ==========================================
-# 6. 北极星看板 (去除了复杂的运力成本，回归纯净商业)
+# 6. 北极星看板 (Executive Summary)
 # ==========================================
-st.markdown("<div class='section-title'>📊 城市级大盘核心预估指标</div>", unsafe_allow_html=True)
+st.markdown("<div class='section-title'>城市级大盘核心预估指标</div>", unsafe_allow_html=True)
 
 c1, c2, c3 = st.columns(3)
-with c1: st.markdown(f"<div class='kpi-card'><h2>¥ {global_total_gtv/10000:.1f} W</h2><p>🚀 预估总 GTV 规模</p></div>", unsafe_allow_html=True)
-with c2: st.markdown(f"<div class='kpi-card'><h2 style='color:#e74c3c;'>¥ {global_coupon_cost/10000:.1f} W</h2><p>🎫 账面补贴消耗 (Cost)</p></div>", unsafe_allow_html=True)
+with c1: st.markdown(f"<div class='kpi-card'><h2>¥ {global_total_gtv/10000:.1f} W</h2><p>预估总 GTV 规模</p></div>", unsafe_allow_html=True)
+with c2: st.markdown(f"<div class='kpi-card'><h2 style='color:#e74c3c;'>¥ {global_coupon_cost/10000:.1f} W</h2><p>账面补贴消耗总额</p></div>", unsafe_allow_html=True)
 with c3: 
     color = "#27ae60" if final_roi >= target_roi else "#c0392b"
-    st.markdown(f"<div class='kpi-card' style='border-top: 5px solid {color};'><h2 style='color:{color};'>{final_roi:.2f} x</h2><p>⚖️ 大盘预期 ROI</p></div>", unsafe_allow_html=True)
+    st.markdown(f"<div class='kpi-card' style='border-top: 5px solid {color};'><h2 style='color:{color};'>{final_roi:.2f} x</h2><p>大盘预期最终 ROI</p></div>", unsafe_allow_html=True)
 
 # ==========================================
-# 7. AI 决策矩阵与纯净财务瀑布
+# 7. AI 决策矩阵与财务核算瀑布图
 # ==========================================
 c_left, c_right = st.columns([1, 1.5])
 
 with c_left:
-    st.markdown("<div class='section-title'>🎯 人群定投决策库</div>", unsafe_allow_html=True)
+    st.markdown("<div class='section-title'>智能人群定投决策库</div>", unsafe_allow_html=True)
     for i, (persona, act) in enumerate(best_policy.items()):
         st.markdown(f"""
         <div class="strategy-card" style="margin-bottom:15px;">
-            <div style="color:#7f8c8d; font-size:13px; font-weight:bold;">客群细分: {persona}</div>
+            <div style="color:#7f8c8d; font-size:13px; font-weight:bold;">目标客群: {persona}</div>
             <h4 style="color:#e67e22; margin:10px 0;">{act['name']}</h4>
         </div>
         """, unsafe_allow_html=True)
 
 with c_right:
-    st.markdown("<div class='section-title'>📈 财务核算：边际收益净值</div>", unsafe_allow_html=True)
-    # 极简版瀑布图，只算 GTV - 补贴
+    st.markdown("<div class='section-title'>财务核算瀑布流</div>", unsafe_allow_html=True)
     fig_wf = go.Figure(go.Waterfall(
         name="财务", orientation="v",
         measure=["relative", "relative", "total"],
-        x=["预估 GTV", "(-) 券成本扣减", "净收益 (Net Margin)"],
+        x=["预估 GTV", "(-) 补贴扣减", "净收益 (Net Margin)"],
         textposition="outside",
         text=[f"¥{global_total_gtv/10000:.1f}W", f"-¥{global_coupon_cost/10000:.1f}W", f"¥{(global_total_gtv-global_coupon_cost)/10000:.1f}W"],
         y=[global_total_gtv, -global_coupon_cost, global_total_gtv-global_coupon_cost],
@@ -207,35 +219,36 @@ with c_right:
     st.plotly_chart(fig_wf, use_container_width=True)
 
 # ==========================================
-# 8. 白盒验证：保留最硬核的因果增量图
+# 8. 白盒审计：因果增量不确定性验证
 # ==========================================
-st.markdown("<div class='section-title'>🔬 白盒审计：反事实基线与真实因果增量 (Uplift)</div>", unsafe_allow_html=True)
-st.info("向评委证明：转化率并非拍脑袋捏造，而是基于严格的『自然流基线 (T=0)』与策略干预计算出的带置信区间的真实增量。")
+st.markdown("<div class='section-title'>白盒审计：反事实基线与真实因果增量 (Uplift)</div>", unsafe_allow_html=True)
+st.info("模型置信度证明：展示自然流基线 (T=0) 与策略干预流 (T=1) 之间的转化率差异，并附带基于统计的 95% 置信区间评估。")
 
 df_attr = pd.DataFrame(group_metrics)
-test_persona = st.selectbox("选择要观测的人群", df_attr['画像'].unique())
+test_persona = st.selectbox("选择审计样本群体", df_attr['画像'].unique())
 
 sample_u = df_users[df_users['画像名称'] == test_persona].iloc[0]
 test_act = best_policy[test_persona]
 
-# 对比自然基线与干预策略
+# 推导反事实与干预结果
 _, _, p_pay_base = causal_markov_funnel(sample_u, selected_scenario, {"type":"none", "cost":0, "threshold":0})
 _, _, p_pay_treat = causal_markov_funnel(sample_u, selected_scenario, test_act)
 
+# 模拟贝叶斯置信区间 (Error Bars)
 error_base = p_pay_base * 0.15 
 error_treat = p_pay_treat * 0.10 
 
 fig_err = go.Figure()
 fig_err.add_trace(go.Bar(
-    name='反事实自然流基线 (T=0)', x=['支付转化率 (Pay Rate)'], y=[p_pay_base], marker_color='#bdc3c7',
+    name='反事实自然流基线 (Control)', x=['支付核销率'], y=[p_pay_base], marker_color='#bdc3c7',
     error_y=dict(type='data', array=[error_base], visible=True)
 ))
 if test_act['type'] != 'none':
     fig_err.add_trace(go.Bar(
-        name=f'策略干预 (T=1: {test_act["name"]})', x=['支付转化率 (Pay Rate)'], y=[p_pay_treat], marker_color='#3498db',
+        name=f'策略干预流 (Treatment: {test_act["name"]})', x=['支付核销率'], y=[p_pay_treat], marker_color='#3498db',
         error_y=dict(type='data', array=[error_treat], visible=True)
     ))
-    fig_err.add_annotation(x=0, y=max(p_pay_treat, p_pay_base)+0.1, text=f"🔥 策略撬动的真实增量 (CATE): +{p_pay_treat - p_pay_base:.1%}", showarrow=False, font=dict(color="#e74c3c", size=16))
+    fig_err.add_annotation(x=0, y=max(p_pay_treat, p_pay_base)+0.1, text=f"真实撬动增量 (Uplift): +{p_pay_treat - p_pay_base:.1%}", showarrow=False, font=dict(color="#e74c3c", size=16))
 
 fig_err.update_layout(barmode='group', height=400, margin=dict(t=30, b=0), plot_bgcolor="rgba(0,0,0,0)", yaxis_tickformat='.0%')
 st.plotly_chart(fig_err, use_container_width=True)
