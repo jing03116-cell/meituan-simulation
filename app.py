@@ -53,7 +53,7 @@ st.markdown("底层马尔可夫转移概率 **100% 由真实宽表特征反推**
 @st.cache_data
 def load_data():
     try:
-        df = pd.read_csv("终极_单场景仿真全息大宽表.csv")
+        df = pd.read_csv("大宽表.csv")
     except:
         # 兜底生成宽表，确保程序必定能跑通演示
         st.warning("未检测到宽表，已自动生成高仿真测试宽表用于界面演示。")
