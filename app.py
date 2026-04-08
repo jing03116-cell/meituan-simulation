@@ -67,7 +67,7 @@ SCENARIOS = {
 # ==========================================
 @st.cache_data
 def generate_action_space():
-    actions = [{"name": "🚫 留白 (Control)", "type": "none", "cost": 0, "threshold": 0}]
+    actions = [{"name": "留白 (Control)", "type": "none", "cost": 0, "threshold": 0}]
     # 免费满减阵列
     for t in [20, 30, 40, 50, 60, 80]:
         for d in [3, 5, 8, 10, 15]:
@@ -198,7 +198,7 @@ with c1: st.markdown(f"<div class='kpi-card'><h2>¥ {global_total_gtv/10000:.1f}
 with c2: st.markdown(f"<div class='kpi-card'><h2>¥ {global_coupon_cost/10000:.1f} W</h2><p>直接账面补贴 (Coupon)</p></div>", unsafe_allow_html=True)
 with c3: 
     alert_class = "kpi-alert" if global_supply_cost > global_coupon_cost else ""
-    st.markdown(f"<div class='kpi-card {alert_class}'><h2>¥ {global_supply_cost/10000:.1f} W</h2><p>🏍️ 运力挤出动态成本 (Supply)</p></div>", unsafe_allow_html=True)
+    st.markdown(f"<div class='kpi-card {alert_class}'><h2>¥ {global_supply_cost/10000:.1f} W</h2><p>运力挤出动态成本 (Supply)</p></div>", unsafe_allow_html=True)
 with c4: 
     color = "#27ae60" if true_causal_roi >= target_roi else "#c0392b"
     st.markdown(f"<div class='kpi-card' style='border-top: 5px solid {color};'><h2 style='color:{color};'>{true_causal_roi:.2f} x</h2><p>真实因果 ROI</p></div>", unsafe_allow_html=True)
