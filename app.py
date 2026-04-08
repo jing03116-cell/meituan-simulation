@@ -22,7 +22,7 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-st.title("智能补贴推演沙盘 (Smart Subsidy Oracle) v8.0")
+st.title("智能补贴推演沙盘 (Smart Subsidy Oracle)")
 st.markdown("融合 **因果推断 (Causal Inference)**、**多智能体仿真 (Agent-based)** 与 **运筹规划 (OR)**，输出可信的商业策略。")
 
 # ==========================================
