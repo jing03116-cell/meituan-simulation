@@ -5,7 +5,7 @@ import plotly.graph_objects as go
 import plotly.express as px
 
 # ==========================================
-# 0. 全局样式配置
+# 0. 全局 SaaS 级美化与页面配置
 # ==========================================
 st.set_page_config(page_title="智能补贴推演沙盘", layout="wide", initial_sidebar_state="expanded")
 
@@ -13,17 +13,17 @@ st.markdown("""
 <style>
     .kpi-card { background: linear-gradient(145deg, #ffffff, #f8f9fa); border-radius: 12px; padding: 25px; box-shadow: 0 4px 20px rgba(0,0,0,0.04); border-top: 5px solid #1f77b4; text-align: center; }
     .kpi-card h2 { color: #1f77b4; margin: 0; font-size: 38px; font-weight: 800; }
-    .kpi-card p { color: #7f8c8d; margin: 8px 0 0 0; font-size: 15px; font-weight: 600; }
-    .strategy-card { background-color: #ffffff; border-radius: 10px; padding: 20px; border: 1px solid #edf2f7; border-left: 4px solid #e67e22; box-shadow: 0 2px 10px rgba(0,0,0,0.02); }
+    .kpi-card p { color: #7f8c8d; margin: 8px 0 0 0; font-size: 15px; font-weight: 600; text-transform: uppercase; }
+    .strategy-card { background-color: #ffffff; border-radius: 10px; padding: 20px; border: 1px solid #edf2f7; box-shadow: 0 2px 10px rgba(0,0,0,0.02); }
     .section-title { font-size: 22px; font-weight: 700; color: #2c3e50; margin-top: 30px; margin-bottom: 20px; border-bottom: 2px solid #eee; padding-bottom: 10px; }
 </style>
 """, unsafe_allow_html=True)
 
-st.title("智能补贴推演沙盘")
-st.markdown("通过反事实基线测算真实增量，利用网格搜索算法在 ROI 约束下寻找大盘 GTV 全局最优解。")
+st.title("智能补贴推演沙盘 (真实神券膨胀版)")
+st.markdown("还原真实的“神券包膨胀”规则，在守住 ROI 底线的前提下，寻找大盘 GTV 规模的全局最优解。")
 
 # ==========================================
-# 1. 数据基建
+# 1. 健壮的数据基建与因果特征加载
 # ==========================================
 @st.cache_data
 def load_data():
@@ -56,23 +56,31 @@ SCENARIOS = {
 }
 
 # ==========================================
-# 2. 策略动作空间生成 (搜索池)
+# 2. 策略空间生成器 (修正真实美团规则)
 # ==========================================
 @st.cache_data
 def generate_action_space():
-    actions = [{"name": "留白 (不发券)", "type": "none", "cost": 0, "threshold": 0}]
+    actions = [{"name": "留白 (Control)", "type": "none", "cost": 0, "threshold": 0}]
+    
+    # 常规免费满减券
     for t in [20, 30, 40, 50, 60, 80]:
         for d in [3, 5, 8, 10, 15]:
             if d <= t * 0.3:
                 actions.append({"name": f"满{t}减{d} 免费券", "type": "free", "cost": d, "threshold": t})
-    actions.append({"name": "1.9元买5元付费包", "type": "paid", "cost": 4, "threshold": 0})
-    actions.append({"name": "4.9元买10元付费包", "type": "paid", "cost": 8, "threshold": 0})
+                
+    # 修正：真实的美团神券包打包发售规则与膨胀核算
+    # 规则1：2.99元得6张5元券。单张分摊购券费约0.5元，假设均值膨胀至7元。平台单笔净成本 = 7 - 0.5 = 6.5元。门槛10元。
+    actions.append({"name": "💎 神券包(2.99元6张)", "type": "paid", "cost": 6.5, "threshold": 10})
+    
+    # 规则2：9.9元得10张神会员券。单张分摊购券费约1元，假设膨胀上限更高，均值膨胀至9元。平台单笔净成本 = 9 - 1 = 8元。门槛10元。
+    actions.append({"name": "👑 神会员(9.9元10张)", "type": "paid", "cost": 8.0, "threshold": 10})
+    
     return actions
 
 ACTIONS = generate_action_space()
 
 # ==========================================
-# 3. 因果马尔可夫引擎
+# 3. 核心因果马尔可夫引擎
 # ==========================================
 def causal_markov_funnel(user, scenario_name, action):
     buff = SCENARIOS[scenario_name]
@@ -95,10 +103,14 @@ def causal_markov_funnel(user, scenario_name, action):
             p_pay += (action['cost'] * 0.05 * sens_free) 
             used_coupon = True
             actual_aov = max(aov, action['threshold'] + 1.0)
+            
     elif action['type'] == 'paid':
-        if sens_paid > 0.05:
-            p_pay = max(p_pay + 0.4 * sens_paid, 0.85) 
-            used_coupon = True
+        # 修正：神券包由于极低门槛（仅需满10元基础配送价即可），几乎必然被使用
+        if aov >= action['threshold']: 
+            if sens_paid > 0.05:
+                # 用户一次性买了多张券，如果不点外卖沉没成本极大，形成强绑定，转化率极高
+                p_pay = max(p_pay + 0.4 * sens_paid, 0.85) 
+                used_coupon = True
 
     p_pay = min(p_pay, 1.0)
     final_prob = p_open * p_cart * p_pay
@@ -109,7 +121,7 @@ def causal_markov_funnel(user, scenario_name, action):
     return exp_gtv, exp_coupon_cost, p_pay
 
 # ==========================================
-# 4. 控制台与商业约束
+# 4. 侧边栏：环境与约束控制台
 # ==========================================
 st.sidebar.header("宏观环境与约束设置")
 selected_scenario = st.sidebar.selectbox("1. 业务场景设定", list(SCENARIOS.keys()))
@@ -118,25 +130,31 @@ city_dau = st.sidebar.slider("2. 城市目标 DAU", 10000, 500000, 100000, 10000
 st.sidebar.markdown("---")
 st.sidebar.subheader("商业寻优红线")
 target_roi = st.sidebar.slider("要求最低 ROI", 1.0, 10.0, 3.0, 0.1)
-st.sidebar.caption("引擎将在保证 ROI 不低于此红线的前提下，遍历所有策略寻找 GTV 极值。")
 
 # ==========================================
-# 5. 运筹学最优策略搜索器 (Grid Search)
+# 5. 运筹优化求解器 (引入 Baseline 对比)
 # ==========================================
 scale_factor = city_dau / len(df_users)
 best_policy = {}
 group_metrics = []
-search_logs = [] # 专门用于记录搜索轨迹的数据结构
+search_logs = []
 
-global_total_gtv = 0
+global_base_gtv = 0       # 新增：自然流基座 GTV
+global_total_gtv = 0      # 包含自然流的总 GTV
+global_incremental_gtv = 0 # 新增：策略撬动的纯增量 GTV
 global_coupon_cost = 0
 
 for persona, group in df_users.groupby('画像名称'):
     max_gtv = -1
     best_act = None
     best_cost = 0
+    base_gtv_group = 0
     
-    # 遍历整个动作空间进行穷举搜索
+    # 优先计算该群体在不发券(Control)情况下的自然基线
+    for _, u in group.iterrows():
+        g_base, _, _ = causal_markov_funnel(u, selected_scenario, {"type":"none", "cost":0, "threshold":0})
+        base_gtv_group += g_base
+        
     for act in ACTIONS:
         t_gtv, t_cost = 0, 0
         for _, u in group.iterrows():
@@ -145,42 +163,52 @@ for persona, group in df_users.groupby('画像名称'):
             
         roi = t_gtv / t_cost if t_cost > 0 else 999
         
-        # 记录每一种策略在该人群身上的表现，用于可视化
         search_logs.append({
             "人群": persona, "策略名称": act['name'], "策略类型": act['type'],
             "预期GTV": t_gtv * scale_factor * (len(group)/len(df_users)), 
             "预期成本": t_cost * scale_factor * (len(group)/len(df_users)),
-            "预期ROI": min(roi, 15) # 封顶便于画图
+            "预期ROI": min(roi, 15) 
         })
         
-        # 约束最优化逻辑：如果 ROI 达标，且 GTV 更大，则更新最优解
         if roi >= target_roi or act['type'] == 'none':
             if t_gtv > max_gtv:
                 max_gtv = t_gtv; best_act = act; best_cost = t_cost
                 
     best_policy[persona] = best_act
     
-    g_gtv = max_gtv * scale_factor * (len(group)/len(df_users))
-    g_cost = best_cost * scale_factor * (len(group)/len(df_users))
-    global_total_gtv += g_gtv; global_coupon_cost += g_cost
+    # 核算放大至大盘级别
+    g_ratio = scale_factor * (len(group)/len(df_users))
+    g_total = max_gtv * g_ratio
+    g_base = base_gtv_group * g_ratio
+    g_cost = best_cost * g_ratio
+    g_inc = g_total - g_base
     
-    group_metrics.append({"画像": persona, "策略": best_act['name'], "贡献GTV": g_gtv, "消耗预算": g_cost})
+    global_total_gtv += g_total
+    global_base_gtv += g_base
+    global_incremental_gtv += g_inc
+    global_coupon_cost += g_cost
+    
+    group_metrics.append({"画像": persona, "策略": best_act['name'], "纯增量GTV": g_inc, "消耗预算": g_cost})
 
-final_roi = global_total_gtv / global_coupon_cost if global_coupon_cost > 0 else 0
+# 计算双重 ROI 口径
+blended_roi = global_total_gtv / global_coupon_cost if global_coupon_cost > 0 else 0
+incremental_roi = global_incremental_gtv / global_coupon_cost if global_coupon_cost > 0 else 0
 
 # ==========================================
-# 6. 北极星看板
+# 6. 北极星看板 (CFO 视角的增量核算)
 # ==========================================
-st.markdown("<div class='section-title'>城市级大盘核心预估指标</div>", unsafe_allow_html=True)
+st.markdown("<div class='section-title'>城市级大盘核心预估指标 (增量口径)</div>", unsafe_allow_html=True)
 c1, c2, c3 = st.columns(3)
-with c1: st.markdown(f"<div class='kpi-card'><h2>¥ {global_total_gtv/10000:.1f} W</h2><p>预估总 GTV 规模</p></div>", unsafe_allow_html=True)
-with c2: st.markdown(f"<div class='kpi-card'><h2 style='color:#e74c3c;'>¥ {global_coupon_cost/10000:.1f} W</h2><p>账面补贴消耗总额</p></div>", unsafe_allow_html=True)
+with c1: 
+    st.markdown(f"<div class='kpi-card'><h2>¥ {global_total_gtv/10000:.1f} W</h2><p>预估大盘总 GTV<br><span style='font-size:12px;color:#aaa;'>(含自然基座 ¥{global_base_gtv/10000:.1f}W)</span></p></div>", unsafe_allow_html=True)
+with c2: 
+    st.markdown(f"<div class='kpi-card'><h2 style='color:#e74c3c;'>¥ {global_coupon_cost/10000:.1f} W</h2><p>账面净补贴消耗<br><span style='font-size:12px;color:#aaa;'>(纯投入)</span></p></div>", unsafe_allow_html=True)
 with c3: 
-    color = "#27ae60" if final_roi >= target_roi else "#c0392b"
-    st.markdown(f"<div class='kpi-card' style='border-top: 5px solid {color};'><h2 style='color:{color};'>{final_roi:.2f} x</h2><p>大盘预期最终 ROI</p></div>", unsafe_allow_html=True)
+    color = "#27ae60" if blended_roi >= target_roi else "#c0392b"
+    st.markdown(f"<div class='kpi-card' style='border-top: 5px solid {color};'><h2 style='color:{color};'>{incremental_roi:.2f} x</h2><p>边际纯增量 ROI (Uplift ROI)<br><span style='font-size:12px;color:#aaa;'>(混合大盘 ROI 为 {blended_roi:.2f}x)</span></p></div>", unsafe_allow_html=True)
 
 # ==========================================
-# 7. 策略输出与财务核算
+# 7. AI 决策矩阵与【增量财务瀑布图】
 # ==========================================
 c_left, c_right = st.columns([1, 1.5])
 with c_left:
@@ -194,35 +222,36 @@ with c_left:
         """, unsafe_allow_html=True)
 
 with c_right:
-    st.markdown("<div class='section-title'>财务核算：边际收益净值</div>", unsafe_allow_html=True)
+    st.markdown("<div class='section-title'>因果财务核算：增量收益解析</div>", unsafe_allow_html=True)
+    # 极其专业的增量瀑布图
     fig_wf = go.Figure(go.Waterfall(
-        name="财务", orientation="v", measure=["relative", "relative", "total"],
-        x=["预估 GTV", "(-) 券成本扣减", "净收益 (Net Margin)"], textposition="outside",
-        text=[f"¥{global_total_gtv/10000:.1f}W", f"-¥{global_coupon_cost/10000:.1f}W", f"¥{(global_total_gtv-global_coupon_cost)/10000:.1f}W"],
-        y=[global_total_gtv, -global_coupon_cost, global_total_gtv-global_coupon_cost],
-        connector={"line":{"color":"rgb(63, 63, 63)"}}, decreasing={"marker":{"color":"#e74c3c"}}, totals={"marker":{"color":"#2ecc71"}}
+        name="财务", orientation="v", measure=["relative", "relative", "relative", "total"],
+        x=["自然基座 GTV", "(+) 策略纯增量 GTV", "(-) 券成本支出", "最终大盘净盘子"], 
+        textposition="outside",
+        text=[f"¥{global_base_gtv/10000:.1f}W", f"+¥{global_incremental_gtv/10000:.1f}W", f"-¥{global_coupon_cost/10000:.1f}W", f"¥{(global_total_gtv-global_coupon_cost)/10000:.1f}W"],
+        y=[global_base_gtv, global_incremental_gtv, -global_coupon_cost, global_total_gtv-global_coupon_cost],
+        connector={"line":{"color":"rgb(63, 63, 63)"}}, 
+        decreasing={"marker":{"color":"#e74c3c"}}, 
+        increasing={"marker":{"color":"#3498db"}},
+        totals={"marker":{"color":"#2ecc71"}}
     ))
     fig_wf.update_layout(margin=dict(t=20, b=20, l=0, r=0), height=350, plot_bgcolor="rgba(0,0,0,0)")
     st.plotly_chart(fig_wf, use_container_width=True)
 
 # ==========================================
-# 8. 核心新增：最优策略搜索空间可视化
+# 8. 策略搜索空间可视化
 # ==========================================
 st.markdown("<div class='section-title'>最优策略搜索空间 (Grid Search Visualization)</div>", unsafe_allow_html=True)
-st.info("展示约束最优化 (Constrained Optimization) 过程：系统遍历数十种策略，淘汰掉左侧红色违规区 (ROI低于底线)，并在右侧绿色安全区中找到 Y 轴最高点作为该人群的最优解。")
 
 df_logs = pd.DataFrame(search_logs)
 search_persona = st.selectbox("选择要观测策略穷举轨迹的人群", df_logs['人群'].unique())
 df_plot = df_logs[df_logs['人群'] == search_persona]
 
-# 绘制散点图
 fig_search = px.scatter(
     df_plot, x="预期ROI", y="预期GTV", color="策略类型", text="策略名称",
     color_discrete_map={"free": "#3498db", "paid": "#9b59b6", "none": "#95a5a6"}
 )
 fig_search.update_traces(textposition='top center', textfont=dict(size=11))
-
-# 添加红线约束
 fig_search.add_vline(x=target_roi, line_width=2, line_dash="dash", line_color="red")
 fig_search.add_vrect(x0=0, x1=target_roi, fillcolor="red", opacity=0.05, layer="below", line_width=0)
 fig_search.add_vrect(x0=target_roi, x1=15, fillcolor="green", opacity=0.05, layer="below", line_width=0)
