@@ -1,6 +1,6 @@
 """
-AI用户仿真平台 - Streamlit Cloud版本
-适用于互联网商业分析的智能补贴推演沙盘
+AI User Simulation & Smart Subsidy Oracle
+Enterprise Production Version
 """
 
 import streamlit as st
@@ -8,543 +8,284 @@ import pandas as pd
 import numpy as np
 import plotly.graph_objects as go
 import plotly.express as px
-from datetime import datetime
 import warnings
 warnings.filterwarnings('ignore')
 
 # ============================================
-# 页面配置（Streamlit Cloud必需）
+# 0. UI Configuration
 # ============================================
 st.set_page_config(
-    page_title="AI用户仿真平台 | 智能补贴推演",
-    page_icon="🎯",
+    page_title="Smart Subsidy Oracle",
     layout="wide",
     initial_sidebar_state="expanded"
 )
 
-# ============================================
-# 全局样式
-# ============================================
 st.markdown("""
 <style>
-    /* 专业级样式 */
-    .main-header {
-        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-        padding: 1.5rem;
-        border-radius: 10px;
-        color: white;
-        margin-bottom: 2rem;
-    }
-    
-    .metric-card {
-        background: white;
-        border-radius: 10px;
-        padding: 1.5rem;
-        box-shadow: 0 2px 10px rgba(0,0,0,0.05);
-        border: 1px solid #e5e7eb;
-        text-align: center;
-    }
-    
-    .metric-value {
-        font-size: 2rem;
-        font-weight: bold;
-        margin: 0.5rem 0;
-    }
-    
-    .metric-label {
-        color: #6b7280;
-        font-size: 0.9rem;
-        text-transform: uppercase;
-    }
-    
-    .section-title {
-        font-size: 1.5rem;
-        font-weight: 600;
-        margin: 2rem 0 1rem 0;
-        padding-bottom: 0.5rem;
-        border-bottom: 2px solid #e5e7eb;
-    }
-    
-    .stButton > button {
-        width: 100%;
-        background-color: #667eea;
-        color: white;
-        font-weight: 600;
-    }
+    .kpi-card { background: linear-gradient(145deg, #ffffff, #f8f9fa); border-radius: 12px; padding: 25px; box-shadow: 0 4px 20px rgba(0,0,0,0.04); border-top: 5px solid #1f77b4; text-align: center; }
+    .kpi-card h2 { color: #1f77b4; margin: 0; font-size: 38px; font-weight: 800; }
+    .kpi-card p { color: #7f8c8d; margin: 8px 0 0 0; font-size: 15px; font-weight: 600; }
+    .strategy-card { background-color: #ffffff; border-radius: 10px; padding: 20px; border: 1px solid #edf2f7; border-left: 4px solid #e67e22; box-shadow: 0 2px 10px rgba(0,0,0,0.02); }
+    .section-title { font-size: 22px; font-weight: 700; color: #2c3e50; margin-top: 30px; margin-bottom: 20px; border-bottom: 2px solid #eee; padding-bottom: 10px; }
 </style>
 """, unsafe_allow_html=True)
 
-# ============================================
-# 标题
-# ============================================
-st.markdown("""
-<div class="main-header">
-    <h1 style="margin:0">🎯 AI用户仿真平台</h1>
-    <p style="margin-top:0.5rem; opacity:0.9; font-size:1.1rem">
-        智能补贴推演沙盘 · 因果推断 · 策略优化
-    </p>
-</div>
-""", unsafe_allow_html=True)
+st.title("Smart Subsidy Oracle (Causal-OR Engine)")
+st.markdown("Based on Causal Inference and MCKP (Multiple Choice Knapsack Problem) Optimization. Simultaneously evaluates Free and Paid coupons under strict Global Budget and ROI constraints.")
 
 # ============================================
-# 侧边栏配置
-# ============================================
-with st.sidebar:
-    st.markdown("## 🎮 仿真控制台")
-    
-    st.markdown("### 📊 基础配置")
-    
-    # 场景选择
-    scenario = st.selectbox(
-        "业务场景",
-        ["周末下午茶", "暴雨晚高峰", "节假日出行", "日常通勤"],
-        help="不同场景影响用户打开率和转化率"
-    )
-    
-    # 城市规模
-    city_scale = st.select_slider(
-        "城市规模（日活用户）",
-        options=["10万", "50万", "100万", "200万", "500万"],
-        value="100万"
-    )
-    
-    # 转换为数字
-    scale_map = {"10万": 100000, "50万": 500000, "100万": 1000000, 
-                 "200万": 2000000, "500万": 5000000}
-    dau = scale_map[city_scale]
-    
-    st.markdown("### 💰 补贴策略")
-    
-    # 券面额
-    coupon_amount = st.slider(
-        "券面额（元）",
-        min_value=3,
-        max_value=20,
-        value=8,
-        step=1
-    )
-    
-    # 使用门槛
-    threshold = st.slider(
-        "使用门槛（元）",
-        min_value=20,
-        max_value=100,
-        value=40,
-        step=5
-    )
-    
-    # 券类型
-    coupon_type = st.radio(
-        "券类型",
-        ["免费券", "付费券包（神券包）"],
-        help="付费券包：用户购买券包，平台净成本更低"
-    )
-    
-    st.markdown("### 🎯 优化目标")
-    
-    target_roi = st.slider(
-        "目标ROI",
-        min_value=1.0,
-        max_value=10.0,
-        value=3.0,
-        step=0.5
-    )
-    
-    st.markdown("---")
-    
-    # 运行按钮
-    run_simulation = st.button(
-        "🚀 运行仿真",
-        type="primary",
-        use_container_width=True
-    )
-
-# ============================================
-# 仿真引擎（替换为读取大宽表数据）
+# 1. Data Contract
 # ============================================
 @st.cache_data
 def load_real_user_data():
-    """从真实的宽表中读取数据，并映射为仿真逻辑所需的特征"""
     try:
         df = pd.read_csv("大宽表.csv")
     except FileNotFoundError:
-        st.error("⚠️ 未在当前目录找到【大宽表.csv】文件，请确保文件已上传！")
+        st.error("Error: [大宽表.csv] not found in the current directory.")
         st.stop()
 
-    # 映射真实列名为现有仿真逻辑使用的列名
     mapping = {
         "画像名称": "persona",
         "平均客单价": "avg_order_value",
-        "补贴覆盖率": "price_sensitivity",      # 借用补贴覆盖率映射为价格敏感度
-        "用券率": "coupon_sensitivity",         # 借用历史用券率映射为券敏感度
-        "动态_点击_至_加购率": "base_conversion_rate" # 借用历史加购率映射为基础转化率
+        "补贴覆盖率": "sub_coverage",      
+        "用券率": "coupon_sensitivity",         
+        "付费券使用率": "paid_sensitivity",
+        "动态_点击_至_加购率": "base_conversion_rate" 
     }
     
-    # 保留需要的列并重命名
     if "user_id" not in df.columns:
         df["user_id"] = ["U" + str(i).zfill(6) for i in range(len(df))]
         
     df = df.rename(columns=mapping)
     
-    # 处理空值与边界约束，保障模型稳定
-    for col in ['avg_order_value', 'price_sensitivity', 'coupon_sensitivity', 'base_conversion_rate']:
+    for col in ['avg_order_value', 'sub_coverage', 'coupon_sensitivity', 'paid_sensitivity', 'base_conversion_rate']:
         if col in df.columns:
             df[col] = df[col].fillna(df[col].mean())
             
-    # 确保客单价不低于仿真设定的15元底线
     if 'avg_order_value' in df.columns:
         df['avg_order_value'] = df['avg_order_value'].clip(lower=15)
         
     return df
 
-def simulate_conversion(user_row, scenario, coupon_info):
-    """模拟用户转化决策"""
-    
-    # 场景因子
-    scenario_factors = {
-        "周末下午茶": {"open_rate": 0.45, "pay_rate": 0.35},
-        "暴雨晚高峰": {"open_rate": 0.65, "pay_rate": 0.25},
-        "节假日出行": {"open_rate": 0.55, "pay_rate": 0.40},
-        "日常通勤": {"open_rate": 0.50, "pay_rate": 0.30}
-    }
-    
-    factors = scenario_factors[scenario]
-    
-    # 基础转化概率
-    base_conv = user_row['base_conversion_rate']
-    
-    # 券的吸引力
-    coupon_appeal = min(
-        coupon_info['amount'] / user_row['avg_order_value'] * user_row['coupon_sensitivity'],
-        1.0
-    )
-    
-    # 价格敏感度影响
-    if user_row['avg_order_value'] >= coupon_info['threshold']:
-        threshold_met = 1.2  # 达到门槛，转化率提升
-    else:
-        threshold_met = 0.3  # 未达到门槛，大幅降低
-    
-    # 计算最终转化概率
-    final_conv = (
-        base_conv * 0.3 +
-        factors['open_rate'] * 0.2 +
-        coupon_appeal * 0.3 +
-        (1 - user_row['price_sensitivity']) * 0.2
-    ) * threshold_met
-    
-    # 付费券包的额外加成 (使用外部全局变量)
-    if coupon_type == "付费券包（神券包）":
-        final_conv *= 1.15  # 沉没成本效应
-    
-    return np.clip(final_conv, 0.05, 0.95)
-
-def run_simulation_model(df, scenario, coupon_amount, threshold, target_roi):
-    """运行仿真模型"""
-    
-    # 场景映射
-    scenario_map = {
-        "周末下午茶": 0.8,
-        "暴雨晚高峰": 1.2,
-        "节假日出行": 1.0,
-        "日常通勤": 0.9
-    }
-    
-    # 成本计算 (使用外部全局变量)
-    if coupon_type == "付费券包（神券包）":
-        # 神券包：用户购买券包，平台实际成本 = 券面额 - 购买费
-        platform_cost = coupon_amount * 0.7  # 假设用户购买成本占30%
-    else:
-        platform_cost = coupon_amount
-    
-    # 逐用户仿真
-    results = []
-    for _, user in df.iterrows():
-        conv_prob = simulate_conversion(user, scenario, 
-                                       {"amount": coupon_amount, "threshold": threshold})
-        
-        # 是否转化
-        converted = np.random.random() < conv_prob
-        
-        if converted:
-            gtv = user['avg_order_value']
-            cost = platform_cost
-        else:
-            gtv = 0
-            cost = 0
-        
-        results.append({
-            "user_id": user['user_id'],
-            "persona": user['persona'],
-            "converted": converted,
-            "gtv": gtv,
-            "cost": cost,
-            "conv_prob": conv_prob
-        })
-    
-    results_df = pd.DataFrame(results)
-    
-    # 聚合统计
-    total_gtv = results_df['gtv'].sum()
-    total_cost = results_df['cost'].sum()
-    roi = total_gtv / total_cost if total_cost > 0 else float('inf')
-    conversion_rate = results_df['converted'].mean()
-    
-    # 分群统计
-    segment_stats = results_df.groupby('persona').agg({
-        'converted': 'mean',
-        'gtv': 'sum',
-        'cost': 'sum'
-    }).reset_index()
-    segment_stats['roi'] = segment_stats['gtv'] / segment_stats['cost'].replace(0, np.nan)
-    
-    return {
-        "total_gtv": total_gtv,
-        "total_cost": total_cost,
-        "roi": roi,
-        "conversion_rate": conversion_rate,
-        "avg_order_value": results_df[results_df['converted']]['gtv'].mean() if len(results_df[results_df['converted']]) > 0 else 0,
-        "segment_stats": segment_stats,
-        "user_results": results_df,
-        "meets_target": roi >= target_roi
-    }
-
-# ============================================
-# 加载真实数据 (替代了原有的 mock 数据生成)
-# ============================================
 df_users = load_real_user_data()
 
-# ============================================
-# 运行仿真
-# ============================================
-if run_simulation:
-    with st.spinner("🔄 正在运行仿真模型..."):
-        # 放大到城市规模
-        scale_factor = dau / len(df_users)
-        
-        results = run_simulation_model(
-            df_users, scenario, coupon_amount, threshold, target_roi
-        )
-        
-        # 放大结果
-        results['total_gtv_scaled'] = results['total_gtv'] * scale_factor
-        results['total_cost_scaled'] = results['total_cost'] * scale_factor
-        
-        st.session_state['results'] = results
-        st.session_state['simulation_run'] = True
+SCENARIOS = {
+    "Weekend_Afternoon_Tea": {"open_rate": 0.45, "base_pay": 0.35},
+    "Rainy_Night": {"open_rate": 0.65, "base_pay": 0.20}, 
+    "Holiday_Travel": {"open_rate": 0.55, "base_pay": 0.45}
+}
 
 # ============================================
-# 显示结果
+# 2. Mixed Action Space (Free & Paid)
 # ============================================
-if 'simulation_run' in st.session_state and st.session_state['simulation_run']:
-    results = st.session_state['results']
+@st.cache_data
+def generate_action_space():
+    actions = [{"name": "Control (No Coupon)", "type": "none", "cost": 0, "threshold": 0, "upfront": 0}]
     
-    # 关键指标卡片
-    st.markdown("<div class='section-title'>📈 核心指标</div>", unsafe_allow_html=True)
+    # Free Coupons
+    for t in [20, 30, 40, 50, 60, 80]:
+        for d in [3, 5, 8, 10, 15]:
+            if d <= t * 0.3:
+                actions.append({"name": f"Free: {t}-{d}", "type": "free", "cost": d, "threshold": t, "upfront": 0})
+                
+    # Paid Coupons (e.g. 2.99 for 6 coupons -> 0.5 upfront per use. Platform net cost = expansion - upfront)
+    actions.append({"name": "Paid: 6-Pack (Net 6.5)", "type": "paid", "cost": 6.5, "threshold": 10, "upfront": 0.5})
+    actions.append({"name": "Paid: VIP (Net 8.0)", "type": "paid", "cost": 8.0, "threshold": 10, "upfront": 1.0})
     
-    col1, col2, col3, col4 = st.columns(4)
+    return actions
+
+ACTIONS = generate_action_space()
+
+# ============================================
+# 3. Vectorized Causal Engine (High Performance)
+# ============================================
+def eval_action_vectorized(df_group, scenario_name, action):
+    buff = SCENARIOS[scenario_name]
     
-    with col1:
-        st.markdown(f"""
-        <div class="metric-card">
-            <div class="metric-label">总GTV</div>
-            <div class="metric-value" style="color: #667eea;">
-                ¥ {results['total_gtv_scaled']/10000:.1f}万
-            </div>
-            <div style="color: #10b981; font-size: 0.9rem;">
-                转化率 {results['conversion_rate']:.1%}
-            </div>
-        </div>
-        """, unsafe_allow_html=True)
+    aov = df_group['avg_order_value'].values
+    sens_free = df_group['coupon_sensitivity'].values
+    sens_paid = df_group['paid_sensitivity'].values
+    sub_cov = df_group['sub_coverage'].values
+    p_cart = df_group['base_conversion_rate'].values
     
-    with col2:
-        cost_ratio = results['total_cost_scaled']/results['total_gtv_scaled']*100 if results['total_gtv_scaled'] > 0 else 0
-        st.markdown(f"""
-        <div class="metric-card">
-            <div class="metric-label">补贴成本</div>
-            <div class="metric-value" style="color: #ef4444;">
-                ¥ {results['total_cost_scaled']/10000:.1f}万
-            </div>
-            <div style="color: #6b7280; font-size: 0.9rem;">
-                占比 {cost_ratio:.1f}%
-            </div>
-        </div>
-        """, unsafe_allow_html=True)
+    p_open = np.minimum(buff['open_rate'], 1.0)
+    p_cart = np.maximum(p_cart, 0.1)
     
-    with col3:
-        roi_color = "#10b981" if results['meets_target'] else "#ef4444"
-        st.markdown(f"""
-        <div class="metric-card">
-            <div class="metric-label">投资回报率</div>
-            <div class="metric-value" style="color: {roi_color};">
-                {results['roi']:.2f}x
-            </div>
-            <div style="color: #6b7280; font-size: 0.9rem;">
-                目标 {target_roi:.1f}x
-            </div>
-        </div>
-        """, unsafe_allow_html=True)
+    # Counterfactual Baseline
+    base_pay_rate = 0.5 * (1 - sub_cov) * buff['base_pay']
+    p_pay_base = np.maximum(base_pay_rate, 0.05)
     
-    with col4:
-        net_profit = results['total_gtv_scaled'] - results['total_cost_scaled']
-        st.markdown(f"""
-        <div class="metric-card">
-            <div class="metric-label">净收益</div>
-            <div class="metric-value" style="color: #8b5cf6;">
-                ¥ {net_profit/10000:.1f}万
-            </div>
-            <div style="color: #6b7280; font-size: 0.9rem;">
-                客单价 ¥ {results['avg_order_value']:.1f}
-            </div>
-        </div>
-        """, unsafe_allow_html=True)
+    p_pay_treat = p_pay_base.copy()
+    used_coupon = np.zeros(len(df_group), dtype=bool)
+    actual_aov = aov.copy()
+    upfront_rev = np.zeros(len(df_group))
     
-    # 状态提示
-    if results['meets_target']:
-        st.success(f"✅ 当前策略达到ROI目标！ (实际 {results['roi']:.2f}x ≥ 目标 {target_roi:.1f}x)")
-    else:
-        st.warning(f"⚠️ 当前策略未达到ROI目标 (实际 {results['roi']:.2f}x < 目标 {target_roi:.1f}x)")
-    
-    # 详细分析
-    st.markdown("<div class='section-title'>📊 详细分析</div>", unsafe_allow_html=True)
-    
-    tab1, tab2, tab3 = st.tabs(["📈 分群表现", "🎯 转化漏斗", "💰 成本效益"])
-    
-    with tab1:
-        # 分群表现
-        segment_df = results['segment_stats']
+    # Treatment Uplift
+    if action['type'] == 'free':
+        mask = aov >= action['threshold'] * 0.7
+        p_pay_treat[mask] += (action['cost'] * 0.05 * sens_free[mask])
+        used_coupon = mask
+        actual_aov[mask] = np.maximum(aov[mask], action['threshold'] + 1.0)
         
-        fig_segment = go.Figure()
+    elif action['type'] == 'paid':
+        mask = (aov >= action['threshold']) & (sens_paid > 0.05)
+        p_pay_treat[mask] = np.maximum(p_pay_treat[mask] + 0.4 * sens_paid[mask], 0.85)
+        used_coupon = mask
+        upfront_rev[mask] = action['upfront']
         
-        fig_segment.add_trace(go.Bar(
-            x=segment_df['persona'],
-            y=segment_df['roi'],
-            name='ROI',
-            marker_color=['#667eea', '#ef4444', '#10b981', '#f59e0b'],
-            text=[f"{x:.2f}x" if pd.notna(x) else "0.0x" for x in segment_df['roi']],
-            textposition='outside'
-        ))
-        
-        fig_segment.add_hline(y=target_roi, line_dash="dash", 
-                              line_color="red", annotation_text=f"目标ROI: {target_roi}x")
-        
-        fig_segment.update_layout(
-            title="各用户群体ROI对比",
-            yaxis_title="ROI (x)",
-            height=400
-        )
-        
-        st.plotly_chart(fig_segment, use_container_width=True)
-        
-        # 数据表格
-        st.dataframe(
-            segment_df.style.format({
-                'converted': '{:.1%}',
-                'gtv': '¥ {:,.0f}',
-                'cost': '¥ {:,.0f}',
-                'roi': '{:.2f}x'
-            }).background_gradient(subset=['roi'], cmap='RdYlGn'),
-            use_container_width=True
-        )
+    p_pay_treat = np.clip(p_pay_treat, 0.0, 1.0)
     
-    with tab2:
-        # 转化漏斗
-        total_users = len(df_users) * scale_factor
-        opened = total_users * 0.6  # 假设打开率
-        clicked = opened * 0.4
-        converted = total_users * results['conversion_rate']
-        
-        fig_funnel = go.Figure(go.Funnel(
-            y=['总用户', '打开APP', '浏览商家', '下单转化'],
-            x=[total_users, opened, clicked, converted],
-            textinfo="value+percent initial",
-            marker={"color": ["#667eea", "#764ba2", "#f59e0b", "#10b981"]}
-        ))
-        
-        fig_funnel.update_layout(title="用户转化漏斗", height=400)
-        st.plotly_chart(fig_funnel, use_container_width=True)
+    final_prob_base = p_open * p_cart * p_pay_base
+    final_prob_treat = p_open * p_cart * p_pay_treat
     
-    with tab3:
-        # 成本效益分析
-        col1, col2 = st.columns(2)
+    exp_gtv_base = final_prob_base * aov
+    # GTV includes actual order value + upfront package purchase price
+    exp_gtv_treat = final_prob_treat * actual_aov + final_prob_treat * upfront_rev
+    exp_cost_treat = np.where(used_coupon, final_prob_treat * action['cost'], 0)
+    
+    # Deadweight Loss (Cost spent on users who would have converted anyway)
+    safe_treat = np.where(p_pay_treat > 0, p_pay_treat, 1)
+    dwl_ratio = np.where(p_pay_treat > 0, p_pay_base / safe_treat, 0)
+    exp_dwl = np.where(used_coupon, final_prob_treat * dwl_ratio * action['cost'], 0)
+    
+    return exp_gtv_base.sum(), exp_gtv_treat.sum(), exp_cost_treat.sum(), exp_dwl.sum()
+
+# ============================================
+# 4. Sidebar: Global Constraints
+# ============================================
+st.sidebar.header("Global Constraints")
+selected_scenario = st.sidebar.selectbox("Scenario", list(SCENARIOS.keys()))
+city_dau = st.sidebar.slider("City DAU", 10000, 500000, 100000, 10000)
+
+st.sidebar.markdown("---")
+st.sidebar.subheader("Optimization Constraints")
+global_budget = st.sidebar.slider("Global Budget Cap (RMB)", 10000, 500000, 150000, 10000)
+target_roi = st.sidebar.slider("Target Uplift ROI", 1.0, 10.0, 3.0, 0.1)
+
+# ============================================
+# 5. AI MCKP Knapsack Solver
+# ============================================
+scale_factor = city_dau / len(df_users)
+segments_data = list(df_users.groupby('persona'))
+
+candidates_matrix = []
+base_gtv_global = 0
+
+# Phase 1: Evaluate all actions for all segments
+for persona, group in segments_data:
+    g_base_raw, _, _, _ = eval_action_vectorized(group, selected_scenario, ACTIONS[0])
+    g_base_scaled = g_base_raw * scale_factor
+    base_gtv_global += g_base_scaled
+    
+    seg_candidates = []
+    for act in ACTIONS:
+        _, g_treat, c_treat, dwl = eval_action_vectorized(group, selected_scenario, act)
+        g_treat_scaled = g_treat * scale_factor
+        c_treat_scaled = c_treat * scale_factor
+        dwl_scaled = dwl * scale_factor
         
-        with col1:
-            # ROI敏感性分析
-            sensitivities = []
-            for amount_mult in [0.5, 0.75, 1.0, 1.25, 1.5]:
-                test_amount = coupon_amount * amount_mult
-                test_results = run_simulation_model(
-                    df_users.sample(min(1000, len(df_users))), scenario, test_amount, threshold, target_roi
-                )
-                sensitivities.append({
-                    '券面额': f"¥ {test_amount:.0f}",
-                    'ROI': test_results['roi'],
-                    '转化率': test_results['conversion_rate']
-                })
+        inc_gtv = g_treat_scaled - g_base_scaled
+        inc_cost = c_treat_scaled
+        
+        roi = inc_gtv / inc_cost if inc_cost > 0 else (999.0 if inc_gtv >= 0 else -999.0)
+        
+        if roi >= target_roi or act['type'] == 'none':
+            seg_candidates.append({
+                "persona": persona, "act": act, "inc_gtv": inc_gtv, 
+                "inc_cost": inc_cost, "roi": roi, "dwl": dwl_scaled, "total_gtv": g_treat_scaled
+            })
             
-            sens_df = pd.DataFrame(sensitivities)
-            
-            fig_sens = px.line(
-                sens_df, x='券面额', y='ROI',
-                title='券面额对ROI的影响',
-                markers=True
-            )
-            fig_sens.add_hline(y=target_roi, line_dash="dash", line_color="red")
-            st.plotly_chart(fig_sens, use_container_width=True)
+    # Sort descending by GTV to establish local optimum
+    seg_candidates.sort(key=lambda x: x['inc_gtv'], reverse=True)
+    candidates_matrix.append(seg_candidates)
+
+# Phase 2: AI Downgrade Algorithm (Resolve Global Budget Cap)
+current_picks = {i: 0 for i in range(len(candidates_matrix))}
+
+while True:
+    current_total_cost = sum(candidates_matrix[i][current_picks[i]]['inc_cost'] for i in range(len(candidates_matrix)))
+    if current_total_cost <= global_budget:
+        break 
         
-        with col2:
-            # 成本构成
-            fig_cost = go.Figure(data=[
-                go.Pie(
-                    labels=['补贴成本', '净收益'],
-                    values=[results['total_cost_scaled'], max(0, net_profit)], # 保护防跌破0报错
-                    marker_colors=['#ef4444', '#10b981'],
-                    hole=0.4
-                )
-            ])
-            fig_cost.update_layout(title="成本收益构成")
-            st.plotly_chart(fig_cost, use_container_width=True)
+    worst_i = -1
+    worst_roi = float('inf')
+    
+    # Find the segment with the lowest ROI to downgrade
+    for i in range(len(candidates_matrix)):
+        pick_idx = current_picks[i]
+        cand = candidates_matrix[i][pick_idx]
+        if cand['inc_cost'] > 0 and cand['roi'] < worst_roi:
+            if pick_idx + 1 < len(candidates_matrix[i]): 
+                worst_roi = cand['roi']
+                worst_i = i
+                
+    if worst_i == -1:
+        break 
+        
+    current_picks[worst_i] += 1
 
-else:
-    # 初始状态显示说明
-    st.info("👈 请在左侧配置参数并点击「运行仿真」开始分析")
-    
-    # 展示示例图表
-    st.markdown("<div class='section-title'>📊 平台能力预览</div>", unsafe_allow_html=True)
-    
-    col1, col2, col3 = st.columns(3)
-    
-    with col1:
-        st.markdown("""
-        ### 🎯 智能仿真
-        - 多智能体行为模拟
-        - 场景化决策引擎
-        - 实时策略推演
-        """)
-    
-    with col2:
-        st.markdown("""
-        ### 📈 因果分析
-        - 增量效果评估
-        - 反事实推理
-        - 异质性分析
-        """)
-    
-    with col3:
-        st.markdown("""
-        ### 🚀 策略优化
-        - 贝叶斯优化
-        - ROI最大化
-        - 预算智能分配
-        """)
+# Phase 3: Compile Results
+best_policy = {}
+global_total_gtv = 0
+global_coupon_cost = 0
+global_dwl = 0
+
+for i in range(len(candidates_matrix)):
+    final_cand = candidates_matrix[i][current_picks[i]]
+    best_policy[final_cand['persona']] = final_cand['act']
+    global_total_gtv += final_cand['total_gtv']
+    global_coupon_cost += final_cand['inc_cost']
+    global_dwl += final_cand['dwl']
+
+global_incremental_gtv = global_total_gtv - base_gtv_global
+incremental_roi = global_incremental_gtv / global_coupon_cost if global_coupon_cost > 0 else 0
+upfront_revenue = sum(candidates_matrix[i][current_picks[i]]['act']['upfront'] * (candidates_matrix[i][current_picks[i]]['total_gtv'] / (df_users['avg_order_value'].mean() + candidates_matrix[i][current_picks[i]]['act']['upfront'])) for i in range(len(candidates_matrix)) if candidates_matrix[i][current_picks[i]]['act']['type'] == 'paid') # Approx estimation for visualization
 
 # ============================================
-# 页脚
+# 6. Executive Dashboard
 # ============================================
-st.markdown("---")
-st.markdown(f"""
-<div style="text-align: center; color: #6b7280; padding: 1rem;">
-    <p>AI用户仿真平台 v2.0 | 最后更新: {datetime.now().strftime('%Y-%m-%d %H:%M')}</p>
-    <p style="font-size: 0.8rem;">基于因果推断与多智能体强化学习 | Powered by Streamlit Cloud</p>
-</div>
-""", unsafe_allow_html=True)
+st.markdown("<div class='section-title'>Global Metrics (Causal Uplift & Budget Constrained)</div>", unsafe_allow_html=True)
+
+c1, c2, c3, c4 = st.columns(4)
+with c1: 
+    st.markdown(f"<div class='kpi-card'><h2>{global_total_gtv/10000:.1f} W</h2><p>Total GTV<br><span style='font-size:12px;color:#aaa;'>(Base: {base_gtv_global/10000:.1f}W)</span></p></div>", unsafe_allow_html=True)
+with c2: 
+    color = "#e74c3c" if global_coupon_cost >= global_budget * 0.95 else "#3498db"
+    st.markdown(f"<div class='kpi-card'><h2 style='color:{color};'>{global_coupon_cost/10000:.1f} W</h2><p>Total Cost<br><span style='font-size:12px;color:#aaa;'>(Cap: {global_budget/10000:.1f}W)</span></p></div>", unsafe_allow_html=True)
+with c3: 
+    st.markdown(f"<div class='kpi-card'><h2 style='color:#e67e22;'>{global_dwl/10000:.1f} W</h2><p>Deadweight Loss<br><span style='font-size:12px;color:#aaa;'>(Free-rider Cost)</span></p></div>", unsafe_allow_html=True)
+with c4: 
+    color = "#27ae60" if incremental_roi >= target_roi else "#c0392b"
+    st.markdown(f"<div class='kpi-card' style='border-top: 5px solid {color};'><h2 style='color:{color};'>{incremental_roi:.2f} x</h2><p>Uplift ROI</p></div>", unsafe_allow_html=True)
+
+# ============================================
+# 7. AI Mixed-Strategy Matrix & Waterfall
+# ============================================
+c_left, c_right = st.columns([1, 1.8])
+with c_left:
+    st.markdown("<div class='section-title'>AI Optimal Portfolio</div>", unsafe_allow_html=True)
+    for persona, act in best_policy.items():
+        st.markdown(f"""
+        <div class="strategy-card" style="margin-bottom:15px;">
+            <div style="color:#7f8c8d; font-size:13px; font-weight:bold;">Segment: {persona}</div>
+            <h4 style="color:#2c3e50; margin:10px 0;">{act['name']}</h4>
+        </div>
+        """, unsafe_allow_html=True)
+
+with c_right:
+    st.markdown("<div class='section-title'>Causal Financial Waterfall</div>", unsafe_allow_html=True)
+    pure_inc_gtv = global_incremental_gtv - upfront_revenue
+    
+    fig_wf = go.Figure(go.Waterfall(
+        name="Financials", orientation="v", measure=["relative", "relative", "relative", "relative", "total"],
+        x=["Base GTV", "(+) Upfront Revenue", "(+) Pure Uplift GTV", "(-) Sub Cost", "Net Output"], 
+        textposition="outside",
+        text=[f"{base_gtv_global/10000:.1f}W", f"+{upfront_revenue/10000:.1f}W", f"+{pure_inc_gtv/10000:.1f}W", f"-{global_coupon_cost/10000:.1f}W", f"{(global_total_gtv-global_coupon_cost)/10000:.1f}W"],
+        y=[base_gtv_global, upfront_revenue, pure_inc_gtv, -global_coupon_cost, global_total_gtv-global_coupon_cost],
+        connector={"line":{"color":"rgb(63, 63, 63)"}}, 
+        decreasing={"marker":{"color":"#e74c3c"}}, 
+        increasing={"marker":{"color":"#3498db"}},
+        totals={"marker":{"color":"#2ecc71"}}
+    ))
+    fig_wf.update_layout(margin=dict(t=20, b=20, l=0, r=0), height=400, plot_bgcolor="rgba(0,0,0,0)")
+    st.plotly_chart(fig_wf, use_container_width=True)
