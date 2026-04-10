@@ -65,7 +65,7 @@ def generate_action_space():
     actions = [{"name": "🚫 留白 (无干预)", "type": "none", "cost": 0, "threshold": 0, "upfront": 0}]
     # 穷举免费券池
     for t in [20, 30, 40, 50, 60, 80]:
-        for d in [4, 5, 8, 12, 15,20]:
+        for d in [4, 5, 8, 12, 15, 20]:
             if d <= t * 0.3:
                 actions.append({"name": f"🎫 免费满减:满{t}减{d}", "type": "free", "cost": d, "threshold": t, "upfront": 0})
     # 引入付费神券 (极高转化锁定，计算净亏损成本)
@@ -80,7 +80,7 @@ ACTIONS = generate_action_space()
 # ============================================
 @st.cache_data
 def load_and_preprocess_data(uploaded_file):
-    """支持上传，兜底内置，并自动修复异常值"""
+    """支持上传，兜底内置，并安全处理所有数据类型防崩溃"""
     if uploaded_file is not None:
         try:
             df = pd.read_csv(uploaded_file) if uploaded_file.name.endswith('.csv') else pd.read_excel(uploaded_file)
@@ -88,36 +88,36 @@ def load_and_preprocess_data(uploaded_file):
             st.error(f"文件读取失败: {e}")
             return None
     else:
-        # 如果没有上传文件，自动生成高质量的模拟业务数据，保证整个平台完美展现所有图表
-        np.random.seed(42)
-        personas = ["高客单家庭党", "价格敏感羊毛党", "线下体验钝感党", "工作日刚需党"]
-        data = []
-        for i in range(2000):
-            p = np.random.choice(personas, p=[0.25, 0.30, 0.15, 0.30])
-            base_aov = {"高客单家庭党": 90, "价格敏感羊毛党": 35, "线下体验钝感党": 65, "工作日刚需党": 42}[p]
-            data.append({
-                "user_id": f"U{str(i).zfill(6)}",
-                "画像名称": p,
-                "平均客单价": max(15, base_aov + np.random.normal(0, 8)),
-                "补贴覆盖率": {"高客单家庭党": 0.3, "价格敏感羊毛党": 0.9, "线下体验钝感党": 0.1, "工作日刚需党": 0.6}[p],
-                "用券率": {"高客单家庭党": 0.4, "价格敏感羊毛党": 0.95, "线下体验钝感党": 0.2, "工作日刚需党": 0.8}[p],
-                "付费券使用率": {"高客单家庭党": 0.6, "价格敏感羊毛党": 0.85, "线下体验钝感党": 0.05, "工作日刚需党": 0.4}[p],
-                "动态_点击_至_加购率": np.clip(np.random.beta(6, 4), 0.1, 0.9),
-                "活跃时间": int(np.random.normal(18 if p != "工作日刚需党" else 12, 3) % 24),
-                "历史订单数": int(max(1, np.random.poisson(15 if p == "价格敏感羊毛党" else 8)))
-            })
-        df = pd.DataFrame(data)
+        # 如果没有上传文件，强制读取当前目录内置的 "大宽表.csv"
+        try:
+            df = pd.read_csv("大宽表.csv")
+        except FileNotFoundError:
+            st.error("⚠️ 未在当前目录找到【大宽表.csv】内置文件，请在侧边栏上传您的数据宽表！")
+            st.stop()
 
-    # 规范化列名
+    # 1. 规范化列名
     mapping = {"画像名称": "persona", "平均客单价": "avg_order_value", "补贴覆盖率": "sub_coverage", 
                "用券率": "coupon_sensitivity", "付费券使用率": "paid_sensitivity", 
                "动态_点击_至_加购率": "base_conversion_rate"}
     df = df.rename(columns={k: v for k, v in mapping.items() if k in df.columns})
     
-    # 填充兜底
-    for col in mapping.values():
-        if col not in df.columns: df[col] = 0.5
-        df[col] = df[col].fillna(df[col].mean())
+    # 2. 单独处理文本列 (persona)，防止 mean() 运算崩溃
+    if 'persona' not in df.columns:
+        df['persona'] = "未知客群"
+    else:
+        df['persona'] = df['persona'].fillna("未知客群")
+        
+    # 3. 安全处理所有的数值列
+    numeric_cols = ['avg_order_value', 'sub_coverage', 'coupon_sensitivity', 'paid_sensitivity', 'base_conversion_rate']
+    for col in numeric_cols:
+        if col not in df.columns: 
+            df[col] = 0.5
+        else:
+            # 强制转为数值，防止 CSV 里混入脏数据（如空白符或带引号数字）导致类型错误
+            df[col] = pd.to_numeric(df[col], errors='coerce')
+            df[col] = df[col].fillna(df[col].mean())
+            
+    # 4. 业务红线兜底约束
     df['avg_order_value'] = df['avg_order_value'].clip(lower=15)
     
     return df
@@ -183,7 +183,7 @@ def eval_action_vectorized(df_group, scenario_name, action):
 # ============================================
 with st.sidebar:
     st.markdown("## 📂 1. 数据底座接入")
-    uploaded_file = st.file_uploader("上传特征宽表 (不传则使用系统高保真兜底数据)", type=['csv', 'xlsx'])
+    uploaded_file = st.file_uploader("上传特征宽表 (不传则自动寻找同目录'大宽表.csv')", type=['csv', 'xlsx'])
     df_users = load_and_preprocess_data(uploaded_file)
     
     st.markdown("## 🎮 2. 宏观运筹控制台")
@@ -259,7 +259,7 @@ if run_btn:
                     if picks[i] + 1 < len(candidates_matrix[i]): 
                         worst_roi, worst_i = candidates_matrix[i][picks[i]]['roi'], i
             if worst_i == -1: break 
-            picks[i] += 1
+            picks[worst_i] += 1
 
         # Phase 3: 单一无脑策略大盘比对数据 (吸收外包对比体系)
         single_strategy_compare = []
@@ -436,7 +436,7 @@ with tab5:
             1. **降维打击单一券**：对比图显示，传统的单一无脑发券极易造成严重亏损。而我们的分层混合策略不仅融合了付费神券的沉没成本效应，还切断了无效拉新。
             2. **防薅羊毛机制生效**：本次策略的无谓损失 (搭便车成本) 被控制在 ¥{res['dwl']/10000:.1f}万 左右。算法主动识别了大量原价也会购买的自然流，并果断对这些“钝感人群”实施了低面额拦截甚至直接留白。
             
-            > **注**：配置您的专属 API Key，此处将由 Qwen / GPT-4o 进行更深度的流式逐字解读！
+            > **注**：配置您的专属 API Key，此处将由大模型进行更深度的分析解读！
             """
             st.markdown(report_str)
         else:
